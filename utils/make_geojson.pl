@@ -71,4 +71,4 @@ while( my $shape_pt = $sth{'select_shapes'}->fetchrow_hashref() ) {
 
 $feature_collection->{'features'} = [values %{$feature_collection->{'features'}}];
 
-print JSON::XS->new->ascii->pretty->encode ($feature_collection);
+print JSON::XS->new->ascii->encode ($feature_collection);
