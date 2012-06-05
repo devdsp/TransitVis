@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>TransitVis</title>
+
+    <link rel="stylesheet" href="openlayers/theme/default/style.css"
+        type="text/css">
+    <link rel="stylesheet" href="openlayers/examples/style.css"
+        type="text/css">
+    <script src="openlayers/lib/OpenLayers.js"></script>
+
+    <style type="text/css">
+        html, body, #map {
+            margin: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+    <script type="text/javascript">
+        var lon = 149.1305;
+        var lat = -35.2785;
+        var zoom = 14;
+        var map;
+
+        var size = new OpenLayers.Size(16,16);
+        calculateOffset = function(size) {
+            return new OpenLayers.Pixel(-(size.w/2), -size.h/2); 
+        };
+        var icon = new OpenLayers.Icon(
+            "img/Anonymous_aiga_bus.png", size, null, calculateOffset
+        );
+
+        function update() {
+            if( 
+                map.getLayersByName("Busses").length < 1 ||
+                map.getLayersByName("Shapes").length < 1 
+            ) {
+                return;
+            }
+            var busses = map.getLayersByName("Busses")[0];
+            var shapes = map.getLayersByName("Shapes")[0];
+
+            // the lazy way to add busses until I've worked out loading
+            // the day's trips is to add one to every shape
+            for(i=0;i<shapes.features.length;++i) {
+                var shape = shapes.features[i];
+                var track = shape.geometry.components;
+
+                // if we haven't added a marker for this shape, add one.
+                if( !shape.data.marker ) {
+                    var marker = 
+                        new OpenLayers.Marker(
+                            new OpenLayers.LonLat(
+                                track[0].x,
+                                track[0].y
+                            ),
+                            icon.clone()
+                        );
+                    marker.data = {};
+                    marker.data.index = 0;
+                    marker.data.distance = 0;
+                    marker.data.shape = shape;
+                    busses.addMarker(marker);
+                    shape.data.marker = true;
+                }
+            }
+
+            for(i=0;i<busses.markers.length;++i) {
+                var marker = busses.markers[i];
+
+                // this is the lazy way to advance the marker's position
+                // while I work out how to load and manage the trips
+                marker.data.distance += 0.01;
+
+                if( marker.data.shape ) {
+
+                    var shape = marker.data.shape;
+                    var shape_dist_traveled = shape.attributes.shape_dist_traveled;
+                    var track = shape.geometry.components;
+
+                    // this updates our 'cached' index of the last
+                    // shape point we passed
+                    while( 
+                        marker.data.distance > 
+                        shape_dist_traveled[ marker.data.index+1 ] 
+                    ) {
+                        marker.data.index++;
+
+                        // hackey overflow protection
+                        // this loops the marker around to the start
+                        if( marker.data.index >= track.length -1 ) {
+                            marker.data.index = 0;
+                            marker.data.distance = 0;
+                        }
+                    }
+
+                    // this is the normalised distance we have traveled
+                    // after the point we just passed but before the next 
+                    // point on the shape.
+                    var ratio = (
+                        marker.data.distance - 
+                        shape_dist_traveled[marker.data.index]
+                    ) / (
+                        shape_dist_traveled[marker.data.index+1] -
+                        shape_dist_traveled[marker.data.index]
+                    );
+
+
+                    // finally update our marker position to the position
+                    // of the point we just passed plus some of the distance
+                    // between this and the next point based on how far along
+                    // the shape segment we are.
+
+                    marker.lonlat = new OpenLayers.LonLat(
+                        track[marker.data.index].x + (
+                            track[marker.data.index+1].x - 
+                            track[marker.data.index].x
+                        )*ratio,
+
+                        track[marker.data.index].y + (
+                            track[marker.data.index+1].y -
+                            track[marker.data.index].y
+                        )*ratio
+                    );
+                }
+            }
+
+            busses.redraw();
+            t=setTimeout('update()',50);
+        }
+
+        function init(){ 
+            map = new OpenLayers.Map( 'map' );
+            map.addControl(new OpenLayers.Control.LayerSwitcher()); 
+            
+            //gets us some background mapness
+            var osm = new OpenLayers.Layer.OSM( "Open Street Map");
+            map.addLayer(osm);
+
+            // Load the OpenStreetMap projection so we can translate
+            // Lon/Lat pairs to fit on the map 
+            var proj = new OpenLayers.Projection("EPSG:4326"); 
+            var point = new OpenLayers.LonLat(lon,lat); 
+            point.transform(proj,map.getProjectionObject());
+            map.setCenter(point, zoom);
+
+            // Load the transit network dataset
+            map.addLayer( 
+                new OpenLayers.Layer.Vector(
+                    "Shapes", { 
+                        strategies: [ new OpenLayers.Strategy.Fixed()], 
+                        protocol: new OpenLayers.Protocol.HTTP(
+                            { 
+                                url: "data/shapes.json", 
+                                format: new OpenLayers.Format.GeoJSON()
+                            }
+                        ), 
+                    }
+                )
+            );
+ 
+            map.addLayer(new OpenLayers.Layer.Markers("Busses"));
+
+            update();
+        }
+
+    </script>
+  </head>
+  <body onload="init()">
+    <div id="map"></div>
+  </body>
+</html>
