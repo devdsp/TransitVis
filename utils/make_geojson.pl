@@ -5,30 +5,19 @@ use warnings;
 use DBI;
 use JSON::XS;
 
-die "Usage ./make_geojson.pl <directory with extracted GTFS>" unless (
-    defined $ARGV[0] && -d $ARGV[0]
+die "need a database as the first parameter" unless (
+    defined $ARGV[0] && -f $ARGV[0]
 );
 
-die "'$ARGV[0]/shapes.txt' does not exist" unless -f $ARGV[0]."/shapes.txt";
-
-open (FH, $ARGV[0].'/shapes.txt') or die "Can't read shapes.txt";
-my $header = <FH>;
-die "shapes file must contain shape_dist_traveled column" 
-    unless $header =~ m/shape_dist_traveled/;
-
 my $dbh = DBI->connect(
-    'dbi:CSV:','','',
-    {
-        f_dir => $ARGV[0],
-        f_ext => '.txt',
-    }
+    'dbi:SQLite:dbname='.$ARGV[0],'','',
 ) or die $!;
 
 my (%sql,%sth);
 
 $sql{'select_shapes'} = <<EOSQL;
 SELECT shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence,shape_dist_traveled
-FROM shapes
+FROM gtfs_shapes
 EOSQL
 
 foreach my $key (keys %sql) {

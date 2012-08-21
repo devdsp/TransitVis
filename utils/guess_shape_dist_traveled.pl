@@ -4,43 +4,78 @@ use warnings;
 use Data::Dumper;
 use Math::Trig qw(great_circle_distance deg2rad);
 
+use DBI;
+die "need a database as the first parameter" unless (
+    defined $ARGV[0] && -f $ARGV[0]
+);
+
+my $dbh = DBI->connect(
+    'dbi:SQLite:dbname='.$ARGV[0],'','',
+) or die $!;
+
 sub NESW {deg2rad($_[0]), deg2rad(90 - $_[1])}
 
-$/ = "\r\n"; 
 
-$_ = <>;
-chomp;
-@_ = split /,/;
+my (%sql,%sth);
 
-my %columns;
-for( my $i = 0; $i < @_; ++$i ) {
-    $columns{$_[$i]} = $i;
+$sql{'select_shapes'} = <<EOSQL;
+SELECT *
+FROM gtfs_shapes
+WHERE shape_dist_traveled IS NULL
+ORDER BY shape_id, shape_pt_sequence
+EOSQL
+
+$sql{'update_shape_pt'} = <<EOSQL;
+UPDATE gtfs_shapes
+SET shape_dist_traveled = ?
+WHERE shape_id = ? AND shape_pt_sequence = ?
+EOSQL
+
+foreach my $key (keys %sql) {
+    $sth{$key} = $dbh->prepare($sql{$key}) or die $!;
 }
 
-print $_,",shape_dist_traveled\r\n";
+$| = 1;
 
+print "Selecting shape data\n";
+$sth{'select_shapes'}->execute();
+
+print "Processing shape data\n";
+my $row_count = 0;
 my $data; 
-while(<>){
-    chomp; @_ = split /,/;
+$dbh->do('BEGIN TRANSACTION') or die $!;
+while(my $row = $sth{'select_shapes'}->fetchrow_hashref() ){
     my @current_point = NESW( 
-        $_[$columns{'shape_pt_lon'}], 
-        $_[$columns{'shape_pt_lat'}] 
+        $row->{'shape_pt_lon'}, 
+        $row->{'shape_pt_lat'} 
     );
     if( 
-        $data->{$_[$columns{'shape_id'}]} && 
-        $data->{$_[$columns{'shape_id'}]}->{last_point} 
+        $data->{$row->{'shape_id'}} && 
+        $data->{$row->{'shape_id'}}->{last_point} 
     ) {
-        $data->{$_[$columns{'shape_id'}]}->{distance} += great_circle_distance( 
-            @{$data->{$_[$columns{'shape_id'}]}->{last_point}}, 
+        $data->{$row->{'shape_id'}}->{distance} += great_circle_distance( 
+            @{$data->{$row->{'shape_id'}}->{last_point}}, 
             @current_point,
             6378
         );
     } else {
-        $data->{$_[$columns{'shape_id'}]} = { distance => 0 };
+        $data->{$row->{'shape_id'}} = { distance => 0 };
     }
 
-    $data->{$_[$columns{'shape_id'}]}->{last_point} = [@current_point];
+    $data->{$row->{'shape_id'}}->{last_point} = [@current_point];
 
-    print join(",", (@_,$data->{$_[$columns{'shape_id'}]}->{distance})),"\r\n";
+    $sth{'update_shape_pt'}->execute(
+        $data->{$row->{'shape_id'}}->{distance},
+        $row->{'shape_id'},
+        $row->{'shape_pt_sequence'} 
+    ) or die $!;
+    ++$row_count;
+    if ($row_count % 1000 == 0 ) {
+        $dbh->do('COMMIT TRANSACTION');
+        $dbh->do('BEGIN TRANSACTION');
+        print ".";
+    }
 } 
+$dbh->do('COMMIT TRANSACTION') or die $!;
+print "\nall done\n";
 
