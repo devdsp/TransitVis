@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="openlayers/examples/style.css"
         type="text/css">
     <script src="openlayers/lib/OpenLayers.js"></script>
+    <script src="js/jquery-1.7.2.js" type="text/javascript"></script>
 
     <style type="text/css">
         html, body, #map {
@@ -39,31 +40,6 @@
             }
             var busses = map.getLayersByName("Busses")[0];
             var shapes = map.getLayersByName("Shapes")[0];
-
-            // the lazy way to add busses until I've worked out loading
-            // the day's trips is to add one to every shape
-            for(i=0;i<shapes.features.length;++i) {
-                var shape = shapes.features[i];
-                var track = shape.geometry.components;
-
-                // if we haven't added a marker for this shape, add one.
-                if( !shape.data.marker ) {
-                    var marker = 
-                        new OpenLayers.Marker(
-                            new OpenLayers.LonLat(
-                                track[0].x,
-                                track[0].y
-                            ),
-                            icon.clone()
-                        );
-                    marker.data = {};
-                    marker.data.index = 0;
-                    marker.data.distance = 0;
-                    marker.data.shape = shape;
-                    busses.addMarker(marker);
-                    shape.data.marker = true;
-                }
-            }
 
             for(i=0;i<busses.markers.length;++i) {
                 var marker = busses.markers[i];
@@ -122,11 +98,59 @@
                             track[marker.data.index].y
                         )*ratio
                     );
+                } else {
+                    if(shape = shapes.getFeatureByFid(marker.data.shape_id) ) {
+                        marker.data.shape = shape;
+                        marker.icon.imageDiv.hidden=0;
+                    }
                 }
             }
 
             busses.redraw();
             t=setTimeout('update()',50);
+        }
+
+
+        function trips_received(data) {
+            var busses = map.getLayersByName("Busses")[0];
+            var shapes = map.getLayersByName("Shapes")[0];
+
+            for(trip_index in data) {
+              var marker = 
+                  new OpenLayers.Marker(
+                      new OpenLayers.LonLat(0,0),
+                      icon.clone()
+                  );
+              marker.icon.imageDiv.hidden=1;
+              marker.data = {};
+              marker.data.index = 0;
+              marker.data.distance = parseFloat(data[trip_index].shape_dist_traveled);
+              marker.data.shape_id = data[trip_index].shape_id;
+              busses.addMarker(marker);
+              if(shape = shapes.getFeatureByFid(marker.data.shape_id) ) {
+                  marker.data.shape = shape;
+              } else {
+                    
+                $.ajax({
+                    url:"ajax.php",
+                    method:'GET',
+                    data:{'func':'shape-pts','id':data[trip_index].shape_id},
+                    success:function(data){
+                        var reader = new OpenLayers.Format.GeoJSON();
+                        var feature = reader.read(data);
+                        feature[0].geometry.transform(
+                            new OpenLayers.Projection("EPSG:4326"),
+                            map.getProjectionObject()
+                        );
+                        var shapes = map.getLayersByName("Shapes")[0];
+                        if( shapes ) {
+                            shapes.addFeatures(feature);
+                            shapes.redraw();
+                        }
+                    }
+                });
+              }
+            }
         }
 
         function init(){ 
@@ -144,24 +168,16 @@
             point.transform(proj,map.getProjectionObject());
             map.setCenter(point, zoom);
 
-            // Load the transit network dataset
-            map.addLayer( 
-                new OpenLayers.Layer.Vector(
-                    "Shapes", { 
-                        strategies: [ new OpenLayers.Strategy.Fixed()], 
-                        protocol: new OpenLayers.Protocol.HTTP(
-                            { 
-                                url: "data/shapes.json", 
-                                format: new OpenLayers.Format.GeoJSON()
-                            }
-                        ), 
-                    }
-                )
-            );
- 
+            map.addLayer(new OpenLayers.Layer.Vector("Shapes"));
             map.addLayer(new OpenLayers.Layer.Markers("Busses"));
 
             update();
+            $.ajax({
+                url:"ajax.php",
+                method:'GET',
+                data:{'func':'running'},
+                success:trips_received
+            });
         }
 
     </script>

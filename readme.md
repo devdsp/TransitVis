@@ -28,7 +28,14 @@ shape_dist_traveled field in both the gtfs_shapes table and the
 gtfs_stop_times tables. They aren't exactly fast nor do I claim them to be
 particularly acurate, but they will do the job for now.
 
+It currently loads trips from a hardcoded date and time that lines up with
+my dataset using jquery's ajax library. It also dynamically loads the shape
+data as it needs it.
+
 TODO
 ====
-All that's left to do is everything.
+Package up the trip timings into something JSONy and use that data to
+set each marker's distance property.
+
+
 
